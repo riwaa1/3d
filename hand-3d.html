@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>تحكّم بالمجسّم بيدك</title>
+<style>
+:root{--bg:#eef0f4;--fg:#14161a;--card:rgba(255,255,255,.82);--ac:#2563eb;color-scheme:light dark;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0e1013;--fg:#eef0f3;--card:rgba(27,30,35,.82);--ac:#5b8cff}}
+:root[data-theme="dark"]{--bg:#0e1013;--fg:#eef0f3;--card:rgba(27,30,35,.82);--ac:#5b8cff}
+html{height:100%;scroll-padding-top:env(safe-area-inset-top,0px)}
+body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,"Segoe UI",Tahoma,sans-serif;overflow:hidden}
+#c{position:absolute;inset:0;width:100%;height:100%;touch-action:none}
+.ui{position:absolute;inset-inline:12px;top:calc(env(safe-area-inset-top,0px) + 10px);display:flex;flex-direction:column;gap:8px;pointer-events:none}
+.card{background:var(--card);backdrop-filter:blur(10px);border-radius:14px;padding:10px 14px;font-size:14px;line-height:1.6;pointer-events:auto;max-width:420px}
+h1{font-size:17px;margin:0 0 4px}
+button{background:var(--ac);color:#fff;border:0;border-radius:10px;padding:10px 16px;font-size:15px;cursor:pointer;font-family:inherit}
+#st{font-weight:600}
+#pv{position:absolute;inset-inline-start:12px;bottom:calc(env(safe-area-inset-bottom,0px) + 12px);width:150px;height:112px;border-radius:12px;overflow:hidden;background:#000;display:none}
+#pv video,#pv canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="ui">
+  <div class="card">
+    <h1>🚗 تحكّم بالمجسّم بيدك</h1>
+    <div>✋ حرّك يدك: تدوير &nbsp;|&nbsp; 🤏 قرّب/باعد الإبهام والسبّابة: تكبير وتصغير &nbsp;|&nbsp; ✊ اقبض يدك: تغيير اللون</div>
+  </div>
+  <div class="card"><button id="go">تشغيل الكاميرا</button> <span id="st">أو استخدم الفأرة/اللمس للتحكّم</span></div>
+</div>
+<div id="pv"><video id="v" playsinline muted></video><canvas id="o" width="320" height="240"></canvas></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js"></script>
+<script>
+const cv=document.getElementById('c'),st=document.getElementById('st');
+const R=new THREE.WebGLRenderer({canvas:cv,antialias:true,alpha:true});
+R.setPixelRatio(Math.min(devicePixelRatio,2));
+const S=new THREE.Scene(),C=new THREE.PerspectiveCamera(45,1,.1,100);
+C.position.set(0,2.2,8);C.lookAt(0,.6,0);
+S.add(new THREE.AmbientLight(0xffffff,.7));
+const dl=new THREE.DirectionalLight(0xffffff,.9);dl.position.set(5,8,6);S.add(dl);
+const car=new THREE.Group(),pivot=new THREE.Group();pivot.add(car);S.add(pivot);
+const colors=[0xd62828,0x2563eb,0x16a34a,0xf59e0b,0x7c3aed,0xe5e7eb];let ci=0;
+const bodyM=new THREE.MeshStandardMaterial({color:colors[0],metalness:.5,roughness:.35});
+const add=(g,m,x,y,z)=>{const o=new THREE.Mesh(g,m);o.position.set(x,y,z);car.add(o);return o};
+add(new THREE.BoxGeometry(4,.8,1.8),bodyM,0,.75,0);
+add(new THREE.BoxGeometry(2,.7,1.6),bodyM,-.2,1.5,0);
+add(new THREE.BoxGeometry(2.02,.5,1.62),new THREE.MeshStandardMaterial({color:0x223344,metalness:.8,roughness:.1}),-.2,1.5,0);
+const wm=new THREE.MeshStandardMaterial({color:0x111111,roughness:.8});
+[[1.2,.95],[1.2,-.95],[-1.2,.95],[-1.2,-.95]].forEach(([x,z])=>{const w=add(new THREE.CylinderGeometry(.48,.48,.4,28),wm,x,.48,z);w.rotation.x=Math.PI/2;
+add(new THREE.CylinderGeometry(.25,.25,.42,20),new THREE.MeshStandardMaterial({color:0xcccccc,metalness:.9,roughness:.3}),x,.48,z).rotation.x=Math.PI/2});
+const lm=new THREE.MeshStandardMaterial({color:0xfff3b0,emissive:0xffe066,emissiveIntensity:.8});
+add(new THREE.BoxGeometry(.1,.2,.4),lm,2.02,.85,.55);add(new THREE.BoxGeometry(.1,.2,.4),lm,2.02,.85,-.55);
+const ground=new THREE.Mesh(new THREE.CircleGeometry(4,48),new THREE.MeshBasicMaterial({color:0x000000,transparent:true,opacity:.12}));
+ground.rotation.x=-Math.PI/2;ground.position.y=.01;S.add(ground);
+car.position.y=0;
+const T={ry:0,rx:.15,s:1},cur={ry:0,rx:.15,s:1};let lastHand=0,drag=null;
+function fit(){const w=innerWidth,h=innerHeight;R.setSize(w,h,false);C.aspect=w/h;C.updateProjectionMatrix()}
+addEventListener('resize',fit);fit();
+(function loop(){requestAnimationFrame(loop);
+  if(performance.now()-lastHand>1500&&!drag)T.ry+=.004;
+  cur.ry+=(T.ry-cur.ry)*.15;cur.rx+=(T.rx-cur.rx)*.15;cur.s+=(T.s-cur.s)*.15;
+  pivot.rotation.y=cur.ry;pivot.rotation.x=cur.rx;pivot.scale.setScalar(cur.s);
+  R.render(S,C)})();
+/* mouse / touch fallback */
+cv.addEventListener('pointerdown',e=>{drag={x:e.clientX,y:e.clientY}});
+addEventListener('pointerup',()=>drag=null);
+addEventListener('pointermove',e=>{if(!drag)return;T.ry+=(e.clientX-drag.x)*.01;T.rx=Math.max(-.6,Math.min(.9,T.rx+(e.clientY-drag.y)*.005));drag={x:e.clientX,y:e.clientY}});
+cv.addEventListener('wheel',e=>{e.preventDefault();T.s=Math.max(.5,Math.min(2.4,T.s-e.deltaY*.001))},{passive:false});
+/* hand tracking */
+const v=document.getElementById('v'),o=document.getElementById('o'),ox=o.getContext('2d');
+const d=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);let fistAt=0,wasFist=false;
+function onRes(r){
+  ox.clearRect(0,0,320,240);
+  const h=r.multiHandLandmarks&&r.multiHandLandmarks[0];
+  if(!h){st.textContent='لا أرى يدك… أرِها للكاميرا';return}
+  lastHand=performance.now();
+  ox.fillStyle='#22d3ee';h.forEach(p=>{ox.beginPath();ox.arc(p.x*320,p.y*240,3,0,7);ox.fill()});
+  const size=d(h[0],h[9])||.1,ratio=d(h[4],h[8])/size;
+  const folded=[[8,6],[12,10],[16,14],[20,18]].every(([t,p])=>h[t].y>h[p].y);
+  const pinch=ratio<.9&&!folded;
+  T.ry=(.5-h[9].x)*Math.PI*2.2;
+  T.rx=Math.max(-.6,Math.min(.9,(h[9].y-.5)*1.6));
+  if(folded){
+    st.textContent='✊ قبضة: تغيير اللون';
+    if(!wasFist&&performance.now()-fistAt>700){ci=(ci+1)%colors.length;bodyM.color.setHex(colors[ci]);fistAt=performance.now()}
+  }else{
+    T.s=.6+Math.max(.1,Math.min(1.4,ratio))*1.1;
+    st.textContent=pinch?'🤏 تكبير/تصغير':'✋ تدوير';
+  }
+  wasFist=folded;
+}
+document.getElementById('go').onclick=async function(){
+  this.disabled=true;st.textContent='جارٍ تشغيل الكاميرا…';
+  try{
+    if(typeof Hands==='undefined')throw new Error('hands');
+    const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:640,height:480}});
+    v.srcObject=stream;await v.play();
+    document.getElementById('pv').style.display='block';
+    const hands=new Hands({locateFile:f=>'https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/'+f});
+    hands.setOptions({maxNumHands:1,modelComplexity:1,minDetectionConfidence:.6,minTrackingConfidence:.5});
+    hands.onResults(onRes);
+    let busy=false;
+    (async function tick(){
+      if(!busy&&v.readyState>=2){busy=true;try{await hands.send({image:v})}catch(e){}busy=false}
+      requestAnimationFrame(tick)})();
+    st.textContent='أرِ يدك للكاميرا';
+  }catch(e){
+    this.disabled=false;
+    st.textContent='تعذّر تشغيل الكاميرا أو التتبّع. استخدم الفأرة/اللمس بدلاً من ذلك.';
+  }
+};
+</script>
+</body>
+</html>
